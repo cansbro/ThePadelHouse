@@ -1,16 +1,18 @@
-# 🎾 ThePadelHouse - WhatsApp Rezervasyon Sistemi
+# 🎾 ThePadelHouse - Multi-Platform Rezervasyon Sistemi
 
-WhatsApp üzerinden otomatik padel kortu rezervasyonu alan akıllı asistan sistemi.
+**WhatsApp** ve **Instagram** üzerinden otomatik padel kortu rezervasyonu alan akıllı asistan sistemi.
 
 ## 🌟 Özellikler
 
-- ✅ **WhatsApp Entegrasyonu** - Unipile API ile WhatsApp Business
+- 📱 **WhatsApp Entegrasyonu** - Unipile API ile WhatsApp Business
+- 📷 **Instagram Entegrasyonu** - Instagram DM ile rezervasyon (YENİ!)
 - 🤖 **Akıllı AI Asistan** - Claude AI ile doğal dil işleme
 - 📅 **Google Calendar** - Kort müsaitlik yönetimi
 - 📧 **Email Onayları** - Otomatik rezervasyon onay emaili
 - 🧠 **Akıllı Hafıza** - 200+ konuşmayı hatırlayan sistem
 - 🏟️ **4 Kort Yönetimi** - Eş zamanlı kort takibi
 - 💰 **Dinamik Fiyatlandırma** - Saat ve güne göre otomatik fiyat
+- 🔄 **Multi-Platform** - Tek sistem, çoklu platform
 
 ## 🏗️ Sistem Mimarisi
 
@@ -18,25 +20,26 @@ WhatsApp üzerinden otomatik padel kortu rezervasyonu alan akıllı asistan sist
 src/
 ├── index.js                          # Ana sunucu
 ├── config/
-│   └── config.js                     # Konfigürasyon
+│   └── config.js                     # Konfigürasyon (Multi-platform)
 ├── services/
-│   ├── unipile.service.js            # WhatsApp API
+│   ├── unipile.service.js            # Multi-Platform API (WhatsApp + Instagram)
 │   ├── claude.service.js             # AI Asistan
 │   ├── calendar.service.js           # Google Calendar
 │   ├── email.service.js              # Email gönderim
 │   └── memory.service.js             # Konuşma hafızası
 └── controllers/
-    └── reservation.controller.js     # Rezervasyon mantığı
+    └── reservation.controller.js     # Rezervasyon mantığı (Multi-platform)
 ```
 
 ## 📋 Gereksinimler
 
 ### API Keys & Hesaplar
 
-1. **Unipile Account** - WhatsApp Business için
+1. **Unipile Account** - WhatsApp & Instagram için
    - Hesap oluştur: https://unipile.com
    - API Key al
-   - WhatsApp numaranı bağla
+   - WhatsApp Business hesabını bağla
+   - Instagram Business hesabını bağla (opsiyonel)
 
 2. **Anthropic API Key** - Claude AI için
    - Hesap oluştur: https://console.anthropic.com

@@ -24,8 +24,9 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => {
   res.json({
     status: 'running',
-    service: 'ThePadelHouse WhatsApp Reservation System',
-    version: '1.0.0',
+    service: 'ThePadelHouse Multi-Platform Reservation System',
+    platforms: ['WhatsApp', 'Instagram'],
+    version: '2.0.0',
     timestamp: new Date().toISOString()
   });
 });
@@ -35,8 +36,8 @@ app.get('/', (req, res) => {
  */
 app.get('/health', async (req, res) => {
   try {
-    // WhatsApp bağlantısını kontrol et
-    const whatsappStatus = await unipileService.checkAccountStatus();
+    // Tüm platformların bağlantısını kontrol et
+    const platformStatuses = await unipileService.checkAllAccountsStatus();
 
     // Email bağlantısını kontrol et
     const emailStatus = await emailService.testConnection();
@@ -44,14 +45,21 @@ app.get('/health', async (req, res) => {
     // Memory istatistikleri
     const memoryStats = memoryService.getStats();
 
+    // Platform istatistikleri
+    const platformStats = await reservationController.getPlatformStats();
+
     res.json({
       status: 'healthy',
       services: {
-        whatsapp: whatsappStatus.isConnected ? 'connected' : 'disconnected',
+        whatsapp: platformStatuses.whatsapp?.isConnected ? 'connected' : 'disconnected',
+        instagram: platformStatuses.instagram?.isConnected ? 'connected' : 'disconnected',
         email: emailStatus ? 'connected' : 'disconnected',
         memory: 'active'
       },
-      stats: memoryStats,
+      stats: {
+        ...memoryStats,
+        platforms: platformStats
+      },
       timestamp: new Date().toISOString()
     });
 
@@ -65,7 +73,7 @@ app.get('/health', async (req, res) => {
 });
 
 /**
- * Webhook - Unipile'dan gelen mesajları al
+ * Webhook - Unipile'dan gelen mesajları al (WhatsApp + Instagram)
  */
 app.post('/webhook/unipile', async (req, res) => {
   try {
@@ -79,14 +87,25 @@ app.post('/webhook/unipile', async (req, res) => {
 
       // Sadece gelen mesajları işle (giden mesajları değil)
       if (message.is_incoming) {
-        const phoneNumber = message.attendees?.[0]?.identifier || message.chat?.identifier;
+        // Platform'u tespit et
+        const platform = unipileService.detectPlatform(message);
+
+        if (!platform) {
+          console.warn('⚠️  Platform tespit edilemedi:', message.account_id);
+          return res.status(200).json({ received: true, warning: 'Unknown platform' });
+        }
+
+        // Identifier'ı al
+        const identifier = unipileService.getIdentifierFromMessage(message, platform);
         const text = message.text;
 
-        if (phoneNumber && text) {
+        if (identifier && text) {
           // Mesajı işle (async olarak, webhook hemen 200 döndürsün)
           setImmediate(async () => {
-            await reservationController.handleIncomingMessage(phoneNumber, text);
+            await reservationController.handleIncomingMessage(platform, identifier, text);
           });
+        } else {
+          console.warn('⚠️  Identifier veya text bulunamadı');
         }
       }
     }
@@ -105,16 +124,23 @@ app.post('/webhook/unipile', async (req, res) => {
  */
 app.post('/api/send-message', async (req, res) => {
   try {
-    const { phoneNumber, message } = req.body;
+    const { platform, identifier, message } = req.body;
 
-    if (!phoneNumber || !message) {
+    if (!platform || !identifier || !message) {
       return res.status(400).json({
         success: false,
-        error: 'phoneNumber ve message gerekli'
+        error: 'platform, identifier ve message gerekli'
       });
     }
 
-    const result = await unipileService.sendMessage(phoneNumber, message);
+    if (!['whatsapp', 'instagram'].includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        error: 'platform "whatsapp" veya "instagram" olmalı'
+      });
+    }
+
+    const result = await unipileService.sendMessage(platform, identifier, message);
 
     res.json(result);
 
@@ -132,17 +158,24 @@ app.post('/api/send-message', async (req, res) => {
  */
 app.post('/api/simulate-message', async (req, res) => {
   try {
-    const { phoneNumber, message } = req.body;
+    const { platform, identifier, message } = req.body;
 
-    if (!phoneNumber || !message) {
+    if (!platform || !identifier || !message) {
       return res.status(400).json({
         success: false,
-        error: 'phoneNumber ve message gerekli'
+        error: 'platform, identifier ve message gerekli'
+      });
+    }
+
+    if (!['whatsapp', 'instagram'].includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        error: 'platform "whatsapp" veya "instagram" olmalı'
       });
     }
 
     // Mesajı controller'a gönder
-    const result = await reservationController.handleIncomingMessage(phoneNumber, message);
+    const result = await reservationController.handleIncomingMessage(platform, identifier, message);
 
     res.json(result);
 
@@ -158,17 +191,20 @@ app.post('/api/simulate-message', async (req, res) => {
 /**
  * Müşteri geçmişini görüntüle (yönetici için)
  */
-app.get('/api/customer/:phoneNumber', (req, res) => {
+app.get('/api/customer/:platform/:identifier', (req, res) => {
   try {
-    const { phoneNumber } = req.params;
+    const { platform, identifier } = req.params;
+    const memoryKey = `${platform}:${identifier}`;
 
-    const customerInfo = memoryService.getCustomerInfo(phoneNumber);
-    const history = memoryService.getConversationHistory(phoneNumber, 50);
+    const customerInfo = memoryService.getCustomerInfo(memoryKey);
+    const history = memoryService.getConversationHistory(memoryKey, 50);
 
     res.json({
+      platform,
+      identifier,
       customerInfo,
       conversationHistory: history,
-      isReturning: memoryService.isReturningCustomer(phoneNumber)
+      isReturning: memoryService.isReturningCustomer(memoryKey)
     });
 
   } catch (error) {
@@ -183,13 +219,17 @@ app.get('/api/customer/:phoneNumber', (req, res) => {
 /**
  * İstatistikler endpoint
  */
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
   try {
     const stats = memoryService.getStats();
+    const platformStats = await reservationController.getPlatformStats();
 
     res.json({
       success: true,
-      stats,
+      stats: {
+        ...stats,
+        platforms: platformStats
+      },
       timestamp: new Date().toISOString()
     });
 
@@ -203,7 +243,29 @@ app.get('/api/stats', (req, res) => {
 });
 
 /**
- * Webhook kurulum endpoint
+ * Platform istatistikleri
+ */
+app.get('/api/stats/platforms', async (req, res) => {
+  try {
+    const platformStats = await reservationController.getPlatformStats();
+
+    res.json({
+      success: true,
+      platforms: platformStats,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Platform istatistik hatası:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Webhook kurulum endpoint (tüm platformlar için)
  */
 app.post('/api/setup-webhook', async (req, res) => {
   try {
@@ -222,6 +284,36 @@ app.post('/api/setup-webhook', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Webhook kurulum hatası:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Günlük özet gönder
+ */
+app.post('/api/send-daily-summary', async (req, res) => {
+  try {
+    const { platform, identifier } = req.body;
+
+    if (!platform || !identifier) {
+      return res.status(400).json({
+        success: false,
+        error: 'platform ve identifier gerekli'
+      });
+    }
+
+    await reservationController.sendDailySummary(platform, identifier);
+
+    res.json({
+      success: true,
+      message: 'Günlük özet gönderildi'
+    });
+
+  } catch (error) {
+    console.error('❌ Günlük özet hatası:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -258,9 +350,11 @@ const PORT = config.port;
 app.listen(PORT, () => {
   console.log('\n🎾 ========================================');
   console.log(`   ThePadelHouse Rezervasyon Sistemi`);
+  console.log('   Multi-Platform (WhatsApp + Instagram)');
   console.log('   ========================================');
   console.log(`   🚀 Sunucu çalışıyor: http://localhost:${PORT}`);
-  console.log(`   📱 WhatsApp: Aktif`);
+  console.log(`   📱 WhatsApp: ${config.unipile.whatsapp.enabled ? 'Aktif' : 'Pasif'}`);
+  console.log(`   📷 Instagram: ${config.unipile.instagram.enabled ? 'Aktif' : 'Pasif'}`);
   console.log(`   🤖 AI Asistan: Claude ${config.anthropic.model}`);
   console.log(`   📧 Email: ${config.email.user}`);
   console.log('   ========================================\n');
@@ -275,13 +369,25 @@ app.listen(PORT, () => {
 async function startupChecks() {
   console.log('🔍 Başlangıç kontrolleri yapılıyor...\n');
 
-  // WhatsApp bağlantısı
-  const whatsappStatus = await unipileService.checkAccountStatus();
-  if (whatsappStatus.isConnected) {
-    console.log('✅ WhatsApp bağlantısı başarılı');
-  } else {
-    console.log('⚠️  WhatsApp bağlantısı kurulamadı');
-    console.log('   Lütfen .env dosyasındaki Unipile ayarlarını kontrol edin');
+  // Platform bağlantıları
+  const platformStatuses = await unipileService.checkAllAccountsStatus();
+
+  if (platformStatuses.whatsapp) {
+    if (platformStatuses.whatsapp.isConnected) {
+      console.log('✅ WhatsApp bağlantısı başarılı');
+    } else {
+      console.log('⚠️  WhatsApp bağlantısı kurulamadı');
+      console.log('   Lütfen .env dosyasındaki UNIPILE_WHATSAPP_ACCOUNT_ID ayarını kontrol edin');
+    }
+  }
+
+  if (platformStatuses.instagram) {
+    if (platformStatuses.instagram.isConnected) {
+      console.log('✅ Instagram bağlantısı başarılı');
+    } else {
+      console.log('⚠️  Instagram bağlantısı kurulamadı');
+      console.log('   Lütfen .env dosyasındaki UNIPILE_INSTAGRAM_ACCOUNT_ID ayarını kontrol edin');
+    }
   }
 
   // Email bağlantısı
@@ -317,7 +423,12 @@ async function startupChecks() {
   console.log(`   Hafta içi akşam: ${config.pricing.weekdayEvening}₺`);
   console.log(`   Hafta sonu: ${config.pricing.weekend}₺`);
 
-  console.log('\n✨ Sistem hazır! WhatsApp mesajları bekleniyor...\n');
+  console.log('\n🏟️  Kortlar:');
+  config.courts.forEach(court => {
+    console.log(`   - ${court.name}`);
+  });
+
+  console.log('\n✨ Sistem hazır! Mesajlar bekleniyor...\n');
 }
 
 // Graceful shutdown

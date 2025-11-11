@@ -5,12 +5,37 @@ module.exports = {
   port: process.env.PORT || 3000,
   nodeEnv: process.env.NODE_ENV || 'development',
 
-  // Unipile Configuration
+  // Unipile Configuration (Multi-platform: WhatsApp + Instagram)
   unipile: {
     apiKey: process.env.UNIPILE_API_KEY,
     dsn: process.env.UNIPILE_DSN,
-    accountId: process.env.UNIPILE_ACCOUNT_ID,
-    apiUrl: 'https://api.unipile.com/v1'
+    apiUrl: 'https://api.unipile.com/v1',
+
+    // WhatsApp Account
+    whatsapp: {
+      accountId: process.env.UNIPILE_WHATSAPP_ACCOUNT_ID,
+      enabled: process.env.UNIPILE_WHATSAPP_ENABLED !== 'false'
+    },
+
+    // Instagram Account
+    instagram: {
+      accountId: process.env.UNIPILE_INSTAGRAM_ACCOUNT_ID,
+      enabled: process.env.UNIPILE_INSTAGRAM_ENABLED !== 'false'
+    }
+  },
+
+  // Supported Platforms
+  platforms: {
+    whatsapp: {
+      name: 'WhatsApp',
+      provider: 'WHATSAPP',
+      icon: '📱'
+    },
+    instagram: {
+      name: 'Instagram',
+      provider: 'INSTAGRAM',
+      icon: '📷'
+    }
   },
 
   // Anthropic Claude API

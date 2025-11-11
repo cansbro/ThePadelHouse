@@ -3,21 +3,30 @@ const calendarService = require('../services/calendar.service');
 const emailService = require('../services/email.service');
 const memoryService = require('../services/memory.service');
 const unipileService = require('../services/unipile.service');
+const config = require('../config/config');
 
 /**
- * Rezervasyon işlemlerini yöneten controller
+ * Multi-Platform Rezervasyon Controller
+ * WhatsApp + Instagram desteği
  */
 class ReservationController {
 
   /**
-   * Gelen WhatsApp mesajını işle
+   * Gelen mesajı işle (WhatsApp veya Instagram)
+   * @param {string} platform - 'whatsapp' veya 'instagram'
+   * @param {string} identifier - Telefon numarası (WhatsApp) veya Username (Instagram)
+   * @param {string} message - Mesaj içeriği
    */
-  async handleIncomingMessage(phoneNumber, message) {
+  async handleIncomingMessage(platform, identifier, message) {
     try {
-      console.log(`📱 Gelen mesaj: ${phoneNumber} - "${message}"`);
+      const platformIcon = config.platforms[platform]?.icon || '💬';
+      console.log(`${platformIcon} Gelen mesaj (${platform}): ${identifier} - "${message}"`);
 
       // Yazıyor göstergesi gönder (daha doğal görünür)
-      await unipileService.sendTypingIndicator(phoneNumber);
+      await unipileService.sendTypingIndicator(platform, identifier);
+
+      // Memory için unique key oluştur (platform + identifier)
+      const memoryKey = `${platform}:${identifier}`;
 
       // Mesajı analiz et - rezervasyon talebi mi?
       const intent = await this.detectIntent(message);
@@ -33,19 +42,20 @@ class ReservationController {
 
         // AI'a mevcut kort durumunu ver ve yanıt oluştur
         const courtInfo = this.formatAvailabilityForAI(availability);
-        aiResponse = await claudeService.processMessage(phoneNumber, message, courtInfo);
+        aiResponse = await claudeService.processMessage(memoryKey, message, courtInfo);
 
       } else if (intent.type === 'reservation_request') {
         // Rezervasyon talebi - Önce müşteri bilgilerini kontrol et
-        const customerInfo = memoryService.getCustomerInfo(phoneNumber);
+        const customerInfo = memoryService.getCustomerInfo(memoryKey);
 
         if (!customerInfo?.name || !customerInfo?.email) {
           // Eksik bilgi var, AI'dan sorup almasını iste
-          aiResponse = await claudeService.processMessage(phoneNumber, message);
+          aiResponse = await claudeService.processMessage(memoryKey, message);
         } else {
           // Bilgiler tamam, rezervasyonu oluştur
           const reservation = await this.createReservation({
-            phoneNumber,
+            platform,
+            identifier,
             courtId: intent.courtId,
             date: intent.date,
             startTime: intent.time,
@@ -62,7 +72,8 @@ class ReservationController {
               `Görüşmek üzere! 🎾`;
 
             // Hafızaya rezervasyonu kaydet
-            memoryService.addReservation(phoneNumber, {
+            memoryService.addReservation(memoryKey, {
+              platform,
               court: reservation.court.name,
               date: reservation.date,
               time: reservation.startTime,
@@ -75,18 +86,20 @@ class ReservationController {
 
       } else if (intent.type === 'cancellation') {
         // İptal talebi
-        aiResponse = await this.handleCancellation(phoneNumber, message);
+        aiResponse = await this.handleCancellation(platform, identifier, message);
 
       } else {
         // Genel sohbet - AI'a yönlendir
-        aiResponse = await claudeService.processMessage(phoneNumber, message);
+        aiResponse = await claudeService.processMessage(memoryKey, message);
       }
 
-      // Yanıtı WhatsApp'tan gönder
-      await unipileService.sendMessage(phoneNumber, aiResponse);
+      // Yanıtı platformdan gönder
+      await unipileService.sendMessage(platform, identifier, aiResponse);
 
       return {
         success: true,
+        platform,
+        identifier,
         response: aiResponse
       };
 
@@ -95,10 +108,12 @@ class ReservationController {
 
       // Hata mesajı gönder
       const errorMessage = 'Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin veya bizi arayın.';
-      await unipileService.sendMessage(phoneNumber, errorMessage);
+      await unipileService.sendMessage(platform, identifier, errorMessage);
 
       return {
         success: false,
+        platform,
+        identifier,
         error: error.message
       };
     }
@@ -158,7 +173,7 @@ class ReservationController {
    * Rezervasyon oluştur
    */
   async createReservation(details) {
-    const { phoneNumber, courtId, date, startTime, customerInfo } = details;
+    const { platform, identifier, courtId, date, startTime, customerInfo } = details;
 
     // Calendar'a rezervasyon ekle
     const reservation = await calendarService.createReservation(
@@ -168,7 +183,8 @@ class ReservationController {
       {
         name: customerInfo.name,
         email: customerInfo.email,
-        phone: phoneNumber
+        phone: identifier,
+        platform: platform
       }
     );
 
@@ -192,10 +208,12 @@ class ReservationController {
   /**
    * İptal işlemi
    */
-  async handleCancellation(phoneNumber, message) {
+  async handleCancellation(platform, identifier, message) {
+    const memoryKey = `${platform}:${identifier}`;
+
     // AI'dan iptal işlemini yönetmesini iste
     const aiResponse = await claudeService.processMessage(
-      phoneNumber,
+      memoryKey,
       message,
       'Müşteri rezervasyon iptali yapmak istiyor. Rezervasyon bilgilerini sor ve iptal işlemini yap.'
     );
@@ -278,7 +296,7 @@ class ReservationController {
   /**
    * Günlük özet mesajı gönder (isteğe bağlı - yöneticiye)
    */
-  async sendDailySummary(adminPhone) {
+  async sendDailySummary(platform, identifier) {
     try {
       const today = new Date();
       const dateStr = calendarService.formatDate(today);
@@ -286,7 +304,9 @@ class ReservationController {
       const schedule = await calendarService.getDaySchedule(dateStr);
       const stats = memoryService.getStats();
 
-      const summary = `📊 Günlük Özet - ${this.formatDate(dateStr)}\n\n` +
+      const platformIcon = config.platforms[platform]?.icon || '💬';
+
+      const summary = `${platformIcon} 📊 Günlük Özet - ${this.formatDate(dateStr)}\n\n` +
         `📅 Toplam Rezervasyon: ${schedule.length}\n` +
         `💬 Aktif Konuşma: ${stats.totalConversations}\n` +
         `👥 Dönüşen Müşteri: ${stats.returningCustomers}\n\n` +
@@ -295,11 +315,36 @@ class ReservationController {
           `• ${event.summary} - ${new Date(event.start.dateTime).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`
         ).join('\n');
 
-      await unipileService.sendMessage(adminPhone, summary);
+      await unipileService.sendMessage(platform, identifier, summary);
 
     } catch (error) {
       console.error('❌ Günlük özet gönderme hatası:', error);
     }
+  }
+
+  /**
+   * Platform istatistikleri
+   */
+  async getPlatformStats() {
+    const stats = memoryService.getStats();
+    const allConversations = memoryService.conversations;
+
+    const platformStats = {
+      whatsapp: 0,
+      instagram: 0,
+      total: stats.totalConversations
+    };
+
+    // Her platform için konuşma sayısını hesapla
+    allConversations.forEach((conversation, key) => {
+      if (key.startsWith('whatsapp:')) {
+        platformStats.whatsapp++;
+      } else if (key.startsWith('instagram:')) {
+        platformStats.instagram++;
+      }
+    });
+
+    return platformStats;
   }
 }
 
