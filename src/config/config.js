@@ -73,7 +73,9 @@ module.exports = {
     { id: 1, name: 'Kort 1' },
     { id: 2, name: 'Kort 2' },
     { id: 3, name: 'Kort 3' },
-    { id: 4, name: 'Kort 4' }
+    { id: 4, name: 'Kort 4' },
+    { id: 5, name: 'Kort 5' },
+    { id: 6, name: 'Kort 6' }
   ],
 
   // Pricing (in TL)

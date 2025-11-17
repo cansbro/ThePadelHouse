@@ -10,7 +10,7 @@
 - 📅 **Google Calendar** - Kort müsaitlik yönetimi
 - 📧 **Email Onayları** - Otomatik rezervasyon onay emaili
 - 🧠 **Akıllı Hafıza** - 200+ konuşmayı hatırlayan sistem
-- 🏟️ **4 Kort Yönetimi** - Eş zamanlı kort takibi
+- 🏟️ **6 Kort Yönetimi** - Eş zamanlı kort takibi
 - 💰 **Dinamik Fiyatlandırma** - Saat ve güne göre otomatik fiyat
 - 🔄 **Multi-Platform** - Tek sistem, çoklu platform
 
